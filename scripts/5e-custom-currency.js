@@ -14,7 +14,7 @@ Hooks.on("ready", function() {
     patch_currencyNames();
     console.log("5e-custom-currency | patch_currencyNames");
     
-    if (game.settings.get("5e-custom-currency", "depCur"))
+    if (fetchParam("depCur"))
     {
         patch_currencyConversion();
         console.log("5e-custom-currency | patch_currencyConversion");
@@ -27,71 +27,65 @@ Hooks.on("ready", function() {
 });
 
 Hooks.on('renderActorSheet5eCharacter', (sheet, html) => {
-    if(!game.settings.get("5e-custom-currency", "depCur")) {
+    if(!fetchParam("depCur")) {
         removeConvertCurrency(html);
     }
 
     alterCharacterCurrency(html);
 });
 
+const currencyTypes = ["pp", "gp", "ep", "sp", "cp"];
+const conversionTypes = ["cp-sp", "sp-ep", "ep-gp", "gp-pp"];
+
 //  Base Functions
 
-function get_conversion_rates() {
-    return {
-        cp_sp: game.settings.get("5e-custom-currency", "cp-sp"),
-        sp_ep: game.settings.get("5e-custom-currency", "sp-ep"),
-        ep_gp: game.settings.get("5e-custom-currency", "ep-gp"),
-        gp_pp: game.settings.get("5e-custom-currency", "gp-pp")
-    }
-}
+const get_conversion_rates = () => conversionTypes.reduce( (rates, type) => {
+	rates[type] = fetchParam(type);
+	return rates;
+}, {});
 
-function fetchParams() {
-    return {
-        cpAlt: game.settings.get("5e-custom-currency", "cpAlt"),
-        spAlt: game.settings.get("5e-custom-currency", "spAlt"),
-        epAlt: game.settings.get("5e-custom-currency", "epAlt"),
-        gpAlt: game.settings.get("5e-custom-currency", "gpAlt"),
-        ppAlt: game.settings.get("5e-custom-currency", "ppAlt"),
-        cpAltAbrv: game.settings.get("5e-custom-currency", "cpAltAbrv"),
-        spAltAbrv: game.settings.get("5e-custom-currency", "spAltAbrv"),
-        epAltAbrv: game.settings.get("5e-custom-currency", "epAltAbrv"),
-        gpAltAbrv: game.settings.get("5e-custom-currency", "gpAltAbrv"),
-        ppAltAbrv: game.settings.get("5e-custom-currency", "ppAltAbrv"),
+const fetchParam = paramKey => game.settings.get("5e-custom-currency", paramKey);
 
-    }
-}
+const fetchParams = () => currencyTypes.reduce((params, currencyType) => {
+	const alt = `${currencyType}Alt`;
+	const altAbrv = `${alt}Abrv`
+	params[alt] = fetchParam(alt);
+	params[altAbrv] = fetchParam(altAbrv);
+	return params;
+}, {});
 
 export function patch_currencyConversion() {
-    let rates = get_conversion_rates();
-
-    CONFIG.DND5E.currencyConversion = {
-        cp: {into: "sp", each: rates["cp_sp"]},
-        sp: {into: "ep", each: rates["sp_ep"]},
-        ep: {into: "gp", each: rates["ep_gp"]},
-        gp: {into: "pp", each: rates["gp_pp"]}
-    };
+    const rates = get_conversion_rates();
+	conversionTypes.forEach(conversionType => {
+		const currencyType = conversionType.slice(0,2);
+		const currency = CONFIG.DND5E.currencies[currencyType];
+		const each = rates[conversionType];
+		const into = conversionType.slice(3);
+		// set the conversion if complete, else remove any existing conversion
+		if( currency && into && each ){
+			currency.conversion = { each, into};
+		}
+		else if(currency){
+			delete currency.conversion;
+		}
+	});
 };
 
 export function patch_currencyNames() {
-    let altNames = fetchParams();
-
-    CONFIG.DND5E.currencies = {
-        "pp": altNames["ppAlt"],
-        "gp": altNames["gpAlt"],
-        "ep": altNames["epAlt"],
-        "sp": altNames["spAlt"],
-        "cp": altNames["cpAlt"]
-    };
+    const currencies = fetchParams();
+	currencyTypes.forEach(currencyType => {
+		const currency = CONFIG.DND5E.currencies[currencyType];
+		currency.label = currencies[`${currencyType}Alt`];
+		currency.abbreviation = currencies[`${currencyType}AltAbrv`];
+	});
 }
 
 function alterCharacterCurrency(html) {
     let altNames = fetchParams();
 
-    html.find('[class="denomination pp"]').text(altNames["ppAltAbrv"]);
-    html.find('[class="denomination gp"]').text(altNames["gpAltAbrv"]);
-    html.find('[class="denomination ep"]').text(altNames["epAltAbrv"]);
-    html.find('[class="denomination sp"]').text(altNames["spAltAbrv"]);
-    html.find('[class="denomination cp"]').text(altNames["cpAltAbrv"]);
+	currencyTypes.forEach(type => {
+		html.find(`[class="denomination ${type}"]`).text(altNames[`${type}AltAbrv`]);
+	});
 }
 
 function independentCurrency() {
@@ -149,20 +143,21 @@ function alterTradeDialogCurrency(html) {
 function alterTradeWindowCurrency(html) {
     let altNames = fetchParams();
 
-    ['pp', 'gp', 'ep', 'sp', 'cp'].forEach(dndCurrency => {
-        const container = html.find('[data-coin="' + dndCurrency + '"]').parent();
+    currencyTypes.forEach(currencyType => {
+        const container = html.find('[data-coin="' + currencyType + '"]').parent();
         if (!container.length) return;
 
         for (const [k, n] of Object.entries(container.contents())) {
             if (n.nodeType === Node.TEXT_NODE) n.remove();
         }
 
-        container.append(' ' + altNames[dndCurrency + "AltAbrv"]);
-        container.attr('title', altNames[dndCurrency + "Alt"]);
+        container.append(' ' + altNames[currencyType + "AltAbrv"]);
+        container.attr('title', altNames[currencyType + "Alt"]);
     });
 }
 
 // Compatibility: Party Overview
+
 Hooks.on('renderPartyOverviewApp', (sheet, html) => {
     alterPartyOverviewWindowCurrency(html);
 });
